@@ -1,5 +1,6 @@
 import psycopg2
-from config import host, user, password, db_name
+
+import config
 
 columns = {
     "time": "TIMESTAMP",
@@ -43,10 +44,10 @@ CREATE TABLE IF NOT EXISTS {device_id} (
 
     try:
         connection = psycopg2.connect(
-            host=host,
-            user=user,
-            password=password,
-            database=db_name
+            host=config.HOST,
+            user=config.USER,
+            password=config.PASSWORD,
+            database=config.DB_NAME
         )
 
         cursor = connection.cursor()
