@@ -45,40 +45,32 @@ def lambda_handler(event, context):
             'statusCode': 400,
             'body': json.dumps({'error': 'Missing device_id parameter'})
         }
-
-    if raw_path == '/getData':
         
-        start_time = query_params.get('start_time')
-        end_time = query_params.get('end_time')
+    start_time = query_params.get('start_time')
+    end_time = query_params.get('end_time')
 
-        if not end_time or not start_time:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Both start_time and end_time must be provided'})
-            }
-
-        conn, cursor = connect_to_db()
-        if not conn:
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'error': 'Failed to connect to the database'})
-            }
-
-        if start_time and end_time:
-            data = get_data_by_date(f"device{device_id}", cursor, start_time, end_time)
-        else:
-            data = get_data_by_date(f"device{device_id}", cursor)
-
-        cursor.close()
-        conn.close()
-
+    if any((start_time, end_time)) and not all((start_time, end_time)):
         return {
-            'statusCode': 200,
-            'body': json.dumps({'data': data}, default=str)
+            'statusCode': 400,
+            'body': json.dumps({'error': 'Both start_time and end_time must be provided'})
         }
 
+    conn, cursor = connect_to_db()
+    if not conn:
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'Failed to connect to the database'})
+        }
+
+    if start_time and end_time:
+        data = get_data_by_date(f"device{device_id}", cursor, start_time, end_time)
     else:
-        return {
-            'statusCode': 404,
-            'body': json.dumps({'error': 'Not Found'})
-        }
+        data = get_data_by_date(f"device{device_id}", cursor)
+
+    cursor.close()
+    conn.close()
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps({'data': data}, default=str)
+    }
