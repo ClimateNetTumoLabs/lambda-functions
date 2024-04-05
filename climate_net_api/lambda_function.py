@@ -28,7 +28,7 @@ def get_data_by_date(device_id, cursor, start_time=None, end_time=None):
     else:
         end_time = (datetime.strptime(end_time, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    query = f"SELECT * FROM {device_id} WHERE time BETWEEN %s AND %s"
+    query = f'SELECT * FROM {device_id} WHERE time BETWEEN %s AND %s'
     cursor.execute(query, (start_time, end_time))
     data = cursor.fetchall()
 
@@ -36,7 +36,6 @@ def get_data_by_date(device_id, cursor, start_time=None, end_time=None):
 
 
 def lambda_handler(event, context):
-    raw_path = event['rawPath']
     query_params = event.get('queryStringParameters', {})
 
     device_id = query_params.get('device_id')
@@ -45,15 +44,9 @@ def lambda_handler(event, context):
             'statusCode': 400,
             'body': json.dumps({'error': 'Missing device_id parameter'})
         }
-        
-    start_time = query_params.get('start_time')
-    end_time = query_params.get('end_time')
 
-    if any((start_time, end_time)) and not all((start_time, end_time)):
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': 'Both start_time and end_time must be provided'})
-        }
+    start_time = query_params.get('start_time', '')
+    end_time = query_params.get('end_time', '')
 
     conn, cursor = connect_to_db()
     if not conn:
@@ -63,9 +56,16 @@ def lambda_handler(event, context):
         }
 
     if start_time and end_time:
-        data = get_data_by_date(f"device{device_id}", cursor, start_time, end_time)
+        data = get_data_by_date(f'device{device_id}', cursor, start_time, end_time)
+
+    elif not start_time and not end_time:
+        data = get_data_by_date(f'device{device_id}', cursor)
+
     else:
-        data = get_data_by_date(f"device{device_id}", cursor)
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': 'Both start_time and end_time must be provided'})
+        }
 
     cursor.close()
     conn.close()
