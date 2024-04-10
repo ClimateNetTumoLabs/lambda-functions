@@ -2,3 +2,18 @@ HOST = ""
 USER = ""
 PASSWORD = ""
 DB_NAME = ""
+
+COLUMNS = {
+    "time": "TIMESTAMP",
+    "uv": "REAL",
+    "lux": "REAL",
+    "temperature": "REAL",
+    "pressure": "SMALLINT",
+    "humidity": "SMALLINT",
+    "pm1": "SMALLINT",
+    "pm2_5": "SMALLINT",
+    "pm10": "SMALLINT",
+    "speed": "REAL",
+    "rain": "REAL",
+    "direction": "TEXT"
+}

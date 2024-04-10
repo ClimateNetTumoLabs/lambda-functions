@@ -1,4 +1,7 @@
 venv/
 .idea/
 
+lambda_function.zip
 config.py
+
+__pycache__/
