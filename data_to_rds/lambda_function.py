@@ -4,6 +4,24 @@ import config
 
 
 def validate_value(key, value):
+    """
+    Validate and format a value based on its data type as specified in the config file.
+
+    Args:
+        key (str): The key representing the column name for which the value is being validated.
+        value: The value to be validated and formatted.
+
+    Returns:
+        str: The validated and formatted value as a string.
+
+    Note:
+        This function checks the data type of the value based on the corresponding column type
+        specified in the config file. It performs the following validations and formatting:
+        - If the value is None, it returns 'NULL'.
+        - If the column type is 'SMALLINT', it rounds the value to the nearest integer and returns it as a string.
+        - Otherwise, it returns the value as a string with single quotes around it.
+        If the value cannot be converted to the specified data type, it returns the original value as a string.
+    """
     try:
         if value is None:
             return "NULL"
@@ -17,6 +35,21 @@ def validate_value(key, value):
 
 
 def connect_to_db(device_id):
+    """
+    Establish a connection to the PostgreSQL database and create a table for the specified device ID.
+
+    Args:
+        device_id (str): The ID of the device for which the table will be created.
+
+    Returns:
+        tuple: A tuple containing the connection object and cursor object.
+            - connection (psycopg2.extensions.connection): The connection to the PostgreSQL database.
+            - cursor (psycopg2.extensions.cursor): The cursor object for executing queries on the database.
+
+    Note:
+        This function creates a table in the database for the specified device ID, using column definitions
+        provided in the config file. If the table already exists, it will not be recreated.
+    """
     column_definitions = [f"{column_name} {column_type}" for column_name, column_type in config.COLUMNS.items()]
     query_columns = ",\n    ".join(column_definitions)
 
@@ -39,6 +72,23 @@ def connect_to_db(device_id):
 
 
 def add_message(info, connection, cursor, is_list=False):
+    """
+    Add message data to the database table for the specified device.
+
+    Args:
+        info (dict): Information about the message including device ID and message data.
+        connection (psycopg2.extensions.connection): The connection to the PostgreSQL database.
+        cursor (psycopg2.extensions.cursor): The cursor object for executing queries on the database.
+        is_list (bool, optional): Flag indicating if the message data is provided as a list or dict. Defaults is False.
+
+    Returns:
+        None
+
+    Note:
+        This function inserts message data into the database table specified by the device ID in the 'info' dictionary.
+        If 'is_list' is True, the message data is expected to be in list format and will be converted to a dictionary
+        based on the expected column names. The function then validates and inserts the message data into the database.
+    """
     device, data = info['device'], info['data']
 
     for data_dict in data:
@@ -71,6 +121,23 @@ def add_message(info, connection, cursor, is_list=False):
 
 
 def lambda_handler(event, context):
+    """
+    Lambda function handler for adding message data to the database.
+
+    Args:
+        event (dict): The event data passed to the lambda function.
+        context (LambdaContext): The runtime information of the lambda function.
+
+    Returns:
+        None
+
+    Note:
+        This function connects to the PostgreSQL database using the device ID from the event data,
+        then adds the message data from the event to the database table for the specified device.
+        It determines the format of the message data (list or dictionary) and calls the 'add_message' function
+        accordingly, with an optional 'is_list' argument set to True if the data is provided as a list.
+        After adding the message data, it closes the database connection.
+    """
     conn, cursor = connect_to_db(event["device"])
 
     if isinstance(event['data'][0], dict):

@@ -2,8 +2,6 @@ venv/
 .idea/
 
 lambda_function.zip
-climate_net_api/lambda_function.zip
-data_to_rds/lambda_function.zip
 config.py
 
-data_to_rds/__pycache__/
+__pycache__/
