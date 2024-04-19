@@ -71,7 +71,7 @@ def connect_to_db(device_id):
         return None, None
 
 
-def add_message(info, connection, cursor, is_list=False):
+def add_message(info, connection, cursor):
     """
     Add message data to the database table for the specified device.
 
@@ -79,34 +79,17 @@ def add_message(info, connection, cursor, is_list=False):
         info (dict): Information about the message including device ID and message data.
         connection (psycopg2.extensions.connection): The connection to the PostgreSQL database.
         cursor (psycopg2.extensions.cursor): The cursor object for executing queries on the database.
-        is_list (bool, optional): Flag indicating if the message data is provided as a list or dict. Defaults is False.
 
     Returns:
         None
 
     Note:
         This function inserts message data into the database table specified by the device ID in the 'info' dictionary.
-        If 'is_list' is True, the message data is expected to be in list format and will be converted to a dictionary
-        based on the expected column names. The function then validates and inserts the message data into the database.
+        The function then validates and inserts the message data into the database.
     """
     device, data = info['device'], info['data']
 
     for data_dict in data:
-        # Remove this condition and is_list argument after Vazgen Sargsyan
-        if is_list:
-            data_dict = {
-                "time": data_dict[0],
-                "temperature": data_dict[2],
-                "pressure": data_dict[3],
-                "humidity": data_dict[4],
-                "pm1": data_dict[5],
-                "pm2_5": data_dict[6],
-                "pm10": data_dict[7],
-                "speed": data_dict[8],
-                "rain": data_dict[9],
-                "direction": data_dict[10],
-            }
-
         keys = []
         values = []
 
@@ -140,9 +123,7 @@ def lambda_handler(event, context):
     """
     conn, cursor = connect_to_db(event["device"])
 
-    if isinstance(event['data'][0], dict):
+    if isinstance(event['data'][0], dict) and cursor:
         add_message(event, conn, cursor)
-    elif isinstance(event['data'][0], list):
-        add_message(event, conn, cursor, is_list=True)
 
     conn.close()

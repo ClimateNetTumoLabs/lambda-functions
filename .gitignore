@@ -5,3 +5,5 @@ lambda_function.zip
 config.py
 
 __pycache__/
+
+.DS_Store
