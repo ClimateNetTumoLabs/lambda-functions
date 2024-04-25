@@ -1,21 +1,36 @@
-import psycopg2
+"""
+Description:
+This module provides functions for interacting with a PostgreSQL database and handling HTTP requests in an AWS Lambda function.
 
+Functions:
+    - connect_to_db: Establishes a connection to the PostgreSQL database.
+    - get_data_by_date: Retrieves data from the database for a specific device within a given time range.
+    - validate_params: Validates query parameters passed to the Lambda function.
+    - lambda_handler: Main entry point for the AWS Lambda function.
+
+Dependencies:
+    - psycopg2: PostgreSQL adapter for Python.
+    - json: JSON serialization and deserialization.
+    - datetime: Date and time manipulation.
+    - timedelta: Time duration calculation.
+    - config: Module containing database connection configuration.
+"""
+
+import psycopg2
 import json
 from datetime import datetime, timedelta
-
 import config
 
 
 def connect_to_db():
     """
-    Establish a connection to the PostgreSQL database using the parameters specified in the config file.
+    Establishes a connection to the PostgreSQL database.
 
     Returns:
-        tuple: A tuple containing the connection object and cursor object.
-            - connection (psycopg2.extensions.connection): The connection to the PostgreSQL database.
-            - cursor (psycopg2.extensions.cursor): The cursor object for executing queries on the database.
+        psycopg2.extensions.connection: A connection object to the database.
 
-        If the connection fails, returns (None, None).
+    Raises:
+        RuntimeError: If connection to the database fails.
     """
     try:
         connection = psycopg2.connect(
@@ -24,66 +39,60 @@ def connect_to_db():
             password=config.PASSWORD,
             database=config.DB_NAME
         )
-        cursor = connection.cursor()
-        return connection, cursor
-
-    except psycopg2.OperationalError:
-        return None, None
+        return connection
+    except Exception as e:
+        raise RuntimeError("Failed to connect to the database") from e
 
 
-def get_data_by_date(device_id, cursor, start_time=None, end_time=None):
+def get_data_by_date(device_id, connection, start_time=None, end_time=None):
     """
-    Retrieve data from the database for a specified device within a given time range.
+    Retrieves data from the database for a specific device within a given time range.
 
     Args:
-        device_id (str): The ID of the device for which data is to be retrieved.
-        cursor (psycopg2.extensions.cursor): The cursor object for executing queries on the database.
-        start_time (str, optional): The start of the time range in the format 'YYYY-MM-DD'. Defaults to None.
-        end_time (str, optional): The end of the time range in the format 'YYYY-MM-DD'. Defaults to None.
+        device_id (int): The ID of the device.
+        connection (psycopg2.extensions.connection): The database connection object.
+        start_time (str, optional): The start time of the data range in 'YYYY-MM-DD' format. Defaults to None.
+        end_time (str, optional): The end time of the data range in 'YYYY-MM-DD' format. Defaults to None.
 
     Returns:
-        list: A list of tuples containing the retrieved data rows from the database.
+        list: A list of tuples containing the fetched data.
 
-    Note:
-        If start_time or end_time is not provided, the function defaults to retrieving data for the current UTC date.
-        The end_time is exclusive, meaning data up to but not including the end_time will be retrieved.
+    Raises:
+        RuntimeError: If fetching data from the database fails.
     """
-    if not start_time or not end_time:
-        now = datetime.utcnow()
-        start_time = now.strftime('%Y-%m-%d')
-        end_time = (now + timedelta(days=1)).strftime('%Y-%m-%d')
-    else:
-        end_time = (datetime.strptime(end_time, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+    try:
+        if not start_time or not end_time:
+            now = datetime.utcnow()
+            start_time = now.strftime('%Y-%m-%d')
+            end_time = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+        else:
+            end_time = (datetime.strptime(end_time, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
-    query = f'SELECT * FROM {device_id} WHERE time BETWEEN %s AND %s'
-    cursor.execute(query, (start_time, end_time))
-    data = cursor.fetchall()
+        with connection.cursor() as cursor:
+            query = f'SELECT * FROM {device_id} WHERE time BETWEEN %s AND %s'
+            cursor.execute(query, (start_time, end_time))
+            data = cursor.fetchall()
 
-    return data
+        return data
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch data for device {device_id}") from e
 
 
-def lambda_handler(event, context):
+def validate_params(query_params):
     """
-    Lambda function handler for retrieving data from the database based on query parameters.
+    Validates query parameters passed to the Lambda function.
 
     Args:
-        event (dict): The event data passed to the lambda function.
-        context (LambdaContext): The runtime information of the lambda function.
+        query_params (dict): A dictionary containing the query parameters.
 
     Returns:
-        dict: A dictionary containing the HTTP response with status code and body.
+        dict: A dictionary containing the validated parameters or an error response.
 
-    Note:
-        This function expects the event to contain queryStringParameters, which should include:
-        - 'device_id': The ID of the device for which data is to be retrieved (required).
-        - 'start_time': The start of the time range in the format 'YYYY-MM-DD' (optional).
-        - 'end_time': The end of the time range in the format 'YYYY-MM-DD' (optional).
-
-        If 'start_time' and 'end_time' are provided, data will be retrieved for the specified time range.
-        If 'start_time' and 'end_time' are not provided, data for the current day will be retrieved.
+    Raises:
+        ValueError: If device_id is not an integer.
+        RuntimeError: If start_time and end_time are provided but have invalid format, or if both are missing.
     """
-    query_params = event.get('queryStringParameters', {})
-
     device_id = query_params.get('device_id')
     if not device_id:
         return {
@@ -91,32 +100,79 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': 'Missing device_id parameter'})
         }
 
-    start_time = query_params.get('start_time', '')
-    end_time = query_params.get('end_time', '')
-
-    conn, cursor = connect_to_db()
-    if not conn:
+    if not (isinstance(device_id, int) or device_id.isdigit()):
         return {
-            'statusCode': 500,
-            'body': json.dumps({'error': 'Failed to connect to the database'})
+            'statusCode': 400,
+            'body': json.dumps(
+                {'error': 'Invalid format for device_id. It must be an integer.'}
+            )
         }
 
+    start_time = query_params.get('start_time')
+    end_time = query_params.get('end_time')
+
     if start_time and end_time:
-        data = get_data_by_date(f'device{device_id}', cursor, start_time, end_time)
+        try:
+            datetime.strptime(start_time, '%Y-%m-%d')
+            datetime.strptime(end_time, '%Y-%m-%d')
+        except ValueError:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Invalid date format. It must be YYYY-MM-DD.'})
+            }
 
+        return {'device': f'device{device_id}', 'start_time': start_time, 'end_time': end_time}
     elif not start_time and not end_time:
-        data = get_data_by_date(f'device{device_id}', cursor)
-
+        return {'device': f'device{device_id}'}
     else:
         return {
             'statusCode': 400,
             'body': json.dumps({'error': 'Both start_time and end_time must be provided'})
         }
 
-    cursor.close()
-    conn.close()
 
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'data': data}, default=str)
-    }
+def lambda_handler(event, context):
+    """
+    Main entry point for the AWS Lambda function.
+
+    Args:
+        event (dict): The event data passed to the Lambda function.
+        context (LambdaContext): The runtime information provided by AWS Lambda.
+
+    Returns:
+        dict: A dictionary containing the HTTP response.
+
+    Raises:
+        RuntimeError: If an error occurs during the execution of the function.
+    """
+    connection = None
+
+    try:
+        query_params = event.get('queryStringParameters', {})
+
+        validation_result = validate_params(query_params)
+
+        if 'statusCode' in validation_result:
+            return validation_result
+
+        device = validation_result['device']
+        start_time = validation_result.get('start_time')
+        end_time = validation_result.get('end_time')
+
+        connection = connect_to_db()
+
+        if start_time and end_time:
+            data = get_data_by_date(device, connection, start_time, end_time)
+        else:
+            data = get_data_by_date(device, connection)
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'data': data}, default=str)
+        }
+    except Exception as e:
+        print(e)
+        raise RuntimeError("Server error occurred while fetching data from the database.") from e
+    finally:
+        if connection:
+            connection.close()

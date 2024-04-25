@@ -1,26 +1,31 @@
-import psycopg2
+"""
+Description:
+This module provides functions for interacting with a PostgreSQL database.
 
+Functions:
+    - validate_value: Validates and formats a value based on the specified column type.
+    - connect_to_db: Establishes a connection to the PostgreSQL database.
+    - create_table: Creates a table in the database for the specified device.
+    - add_message: Inserts messages into the specified device's table.
+"""
+
+import psycopg2
 import config
 
 
 def validate_value(key, value):
     """
-    Validate and format a value based on its data type as specified in the config file.
+    Validates and formats a value based on the specified column type.
 
     Args:
-        key (str): The key representing the column name for which the value is being validated.
-        value: The value to be validated and formatted.
+        key (str): The key corresponding to the column name.
+        value (str): The value to be validated and formatted.
 
     Returns:
-        str: The validated and formatted value as a string.
+        str: The validated and formatted value.
 
-    Note:
-        This function checks the data type of the value based on the corresponding column type
-        specified in the config file. It performs the following validations and formatting:
-        - If the value is None, it returns 'NULL'.
-        - If the column type is 'SMALLINT', it rounds the value to the nearest integer and returns it as a string.
-        - Otherwise, it returns the value as a string with single quotes around it.
-        If the value cannot be converted to the specified data type, it returns the original value as a string.
+    Raises:
+        ValueError: If the value cannot be converted to the expected type.
     """
     try:
         if value is None:
@@ -34,27 +39,16 @@ def validate_value(key, value):
         return f"'{value}'"
 
 
-def connect_to_db(device_id):
+def connect_to_db():
     """
-    Establish a connection to the PostgreSQL database and create a table for the specified device ID.
-
-    Args:
-        device_id (str): The ID of the device for which the table will be created.
+    Establishes a connection to the PostgreSQL database.
 
     Returns:
-        tuple: A tuple containing the connection object and cursor object.
-            - connection (psycopg2.extensions.connection): The connection to the PostgreSQL database.
-            - cursor (psycopg2.extensions.cursor): The cursor object for executing queries on the database.
+        psycopg2.extensions.connection: The connection object.
 
-    Note:
-        This function creates a table in the database for the specified device ID, using column definitions
-        provided in the config file. If the table already exists, it will not be recreated.
+    Raises:
+        Exception: If the connection to the database fails.
     """
-    column_definitions = [f"{column_name} {column_type}" for column_name, column_type in config.COLUMNS.items()]
-    query_columns = ",\n    ".join(column_definitions)
-
-    create_table_query = f"CREATE TABLE IF NOT EXISTS {device_id} (id SERIAL PRIMARY KEY, {query_columns});"
-
     try:
         connection = psycopg2.connect(
             host=config.HOST,
@@ -62,68 +56,101 @@ def connect_to_db(device_id):
             password=config.PASSWORD,
             database=config.DB_NAME
         )
-        cursor = connection.cursor()
-        cursor.execute(create_table_query)
-        connection.commit()
-        return connection, cursor
 
-    except psycopg2.OperationalError:
-        return None, None
+        return connection
+
+    except Exception as e:
+        raise Exception(f"Failed to connect to DB. Error: {str(e)}")
 
 
-def add_message(info, connection, cursor):
+def create_table(device, connection):
     """
-    Add message data to the database table for the specified device.
+    Creates a table in the database for the specified device.
 
     Args:
-        info (dict): Information about the message including device ID and message data.
-        connection (psycopg2.extensions.connection): The connection to the PostgreSQL database.
-        cursor (psycopg2.extensions.cursor): The cursor object for executing queries on the database.
+        device (str): The name of the device for which the table is created.
+        connection (psycopg2.extensions.connection): The connection object to the database.
 
-    Returns:
-        None
-
-    Note:
-        This function inserts message data into the database table specified by the device ID in the 'info' dictionary.
-        The function then validates and inserts the message data into the database.
+    Raises:
+        Exception: If the table creation fails.
     """
-    device, data = info['device'], info['data']
+    try:
+        column_definitions = [f"{column_name} {column_type}" for column_name, column_type in config.COLUMNS.items()]
+        query_columns = ",\n    ".join(column_definitions)
 
-    for data_dict in data:
-        keys = []
-        values = []
+        create_table_query = f"CREATE TABLE IF NOT EXISTS {device} (id SERIAL PRIMARY KEY, {query_columns});"
 
-        for key, value in data_dict.items():
-            if key in config.COLUMNS.keys():
-                keys.append(key)
-                values.append(validate_value(key, value))
+        with connection.cursor() as cursor:
+            cursor.execute(create_table_query)
+            connection.commit()
+    except Exception as e:
+        raise Exception(f"Failed to create table for device {device}. Error: {str(e)}")
 
-        cursor.execute(f"INSERT INTO {device} ({', '.join(keys)}) VALUES ({', '.join(values)})")
 
-    connection.commit()
+def add_message(device, data, connection):
+    """
+    Inserts messages into the specified device's table.
+
+    Args:
+        device (str): The name of the device.
+        data (list): A list of dictionaries containing data to be inserted into the table.
+        connection (psycopg2.extensions.connection): The connection object to the database.
+
+    Raises:
+        Exception: If the insertion of messages fails.
+    """
+    try:
+        query = "INSERT INTO {} ({}) VALUES ({})"
+
+        with connection.cursor() as cursor:
+            for data_dict in data:
+                keys = []
+                values = []
+
+                for key, value in data_dict.items():
+                    if key in config.COLUMNS.keys():
+                        keys.append(key)
+                        values.append(validate_value(key, value))
+
+                data_keys = ', '.join(keys)
+                data_values = ', '.join(values)
+                cursor.execute(query.format(device, data_keys, data_values))
+
+            connection.commit()
+    except Exception as e:
+        raise Exception(f"Failed to insert messages for device {device}. Error: {str(e)}")
 
 
 def lambda_handler(event, context):
     """
-    Lambda function handler for adding message data to the database.
+    Handles the Lambda function execution.
 
     Args:
-        event (dict): The event data passed to the lambda function.
-        context (LambdaContext): The runtime information of the lambda function.
+        event (dict): The event data passed to the Lambda function.
+        context (LambdaContext): The runtime information of the Lambda function.
 
-    Returns:
-        None
-
-    Note:
-        This function connects to the PostgreSQL database using the device ID from the event data,
-        then adds the message data from the event to the database table for the specified device.
-        It determines the format of the message data (list or dictionary) and calls the 'add_message' function
-        accordingly, with an optional 'is_list' argument set to True if the data is provided as a list.
-        After adding the message data, it closes the database connection.
+    Raises:
+        KeyError: If required parameters are missing in the event.
+        Exception: If an error occurs during execution.
     """
-    conn, cursor = connect_to_db(event["device"])
+    connection = None
 
-    if isinstance(event['data'][0], dict) and cursor:
-        add_message(event, conn, cursor)
+    try:
+        device = event['device']
+        device_data = event['data']
 
-    conn.close()
+        if device is None:
+            raise ValueError("Parameter 'device' is missing")
+        if device_data is None:
+            raise ValueError("Parameter 'data' is missing")
+
+        connection = connect_to_db()
+        create_table(device=device, connection=connection)
+        add_message(device=device, data=device_data, connection=connection)
+    except KeyError as ke:
+        raise KeyError("Parameter '{}' is missing in the event".format(ke.args[0]))
+    except Exception as e:
+        raise e
+    finally:
+        if connection:
+            connection.close()
