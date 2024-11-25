@@ -2,7 +2,8 @@ from lambda_function import lambda_handler
 
 
 event = {
-    "thingName": "ArnoTest2"  
+    "thingName": "TestUfar",
+     "delete":True
 }
 
 
