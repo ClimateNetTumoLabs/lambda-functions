@@ -1,76 +1,77 @@
 import json
-import boto3
-from botocore.exceptions import ClientError
+import os
+import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
-import os
-import config
+
 def boto3_rawemailv2():
     SENDER = "baboomian53@gmail.com"
     RECIPIENT = "rnobaboomian@gmail.com"
-    CONFIGURATION_SET = "ConfigSet"
-    AWS_REGION = "us-east-1"
     SUBJECT = "Customer service contact info"
-    ATTACHMENT = "/Users/arno/Desktop/ClimateNet/lambda-functions/mail_service/mail.zip"
+    
+    ATTACHMENT = None
+    HTML_FILE_PATH = "./html/notify.html"  
     BODY_TEXT = "Hello,\r\nPlease see the attached file for a list of customers to contact."
 
-    
-    BODY_HTML = """\
-    <html>
-    <head/>
-    <body>
-    <h1>Hello!</h1>
-    <p>Please see the attached file for a list of customers to contact.</p>
-    </body>
-    </html>
-    """
-
     CHARSET = "utf-8"
+
+    
+    try:
+        with open(HTML_FILE_PATH, "r", encoding="utf-8") as html_file:
+            BODY_HTML = html_file.read()
+    except FileNotFoundError:
+        print(f"Error: HTML file not found at {HTML_FILE_PATH}")
+        return
+    except Exception as e:
+        print(f"Error reading HTML file: {e}")
+        return
+
+    
     msg = MIMEMultipart('mixed')
-    
-    msg['Subject'] = SUBJECT 
-    msg['From'] = SENDER 
+    msg['Subject'] = SUBJECT
+    msg['From'] = SENDER
     msg['To'] = RECIPIENT
-    
+
     
     msg_body = MIMEMultipart('alternative')
-    
     textpart = MIMEText(BODY_TEXT.encode(CHARSET), 'plain', CHARSET)
     htmlpart = MIMEText(BODY_HTML.encode(CHARSET), 'html', CHARSET)
-    
     msg_body.attach(textpart)
     msg_body.attach(htmlpart)
-    
-    att = MIMEApplication(open(ATTACHMENT, 'rb').read())
-    
-    
-    att.add_header('Content-Disposition','attachment',filename=os.path.basename(ATTACHMENT))
-    
-    
     msg.attach(msg_body)
-    msg.attach(att)
-
-    strmsg = str(msg)
-    body = bytes (strmsg, 'utf-8')
 
     
-    boto3.setup_default_session(
-        aws_access_key_id=config.ACCESS_KEY,
-        aws_secret_access_key=config.SECRET_KEY,
-        region_name=config.REGION
-    )
-    client = boto3.client('sesv2')
-    response = client.send_email(
-    FromEmailAddress=SENDER,
-    Destination={
-        'ToAddresses': [RECIPIENT]
-    },
-    Content={
-        'Raw': {
-            'Data': body
-        }
+    if (ATTACHMENT is not None):
+        with open(ATTACHMENT, 'rb') as attachment_file:
+            att = MIMEApplication(attachment_file.read())
+            att.add_header('Content-Disposition', 'attachment', filename=os.path.basename(ATTACHMENT))
+        msg.attach(att)
+
+    
+    email_as_string = msg.as_string()
+
+    
+    payload = {
+        "mail_data": email_as_string,
+        "recipient": RECIPIENT
     }
-    )
-    print(response)
-boto3_rawemailv2 ()
+
+    
+    url = "https://4vvxx9iw2d.execute-api.us-east-1.amazonaws.com/testing/mailService"
+
+    
+    headers = {"Content-Type": "application/json"}
+    try:
+        response = requests.post(url, data=json.dumps(payload), headers=headers)
+        
+        if response.status_code == 200:
+            print("Lambda function executed successfully!")
+            print("Response:", response.json())
+        else:
+            print(f"Error triggering Lambda: {response.status_code}")
+            print("Response:", response.text)
+    except requests.exceptions.RequestException as e:
+        print(f"Request failed: {e}")
+
+boto3_rawemailv2()
