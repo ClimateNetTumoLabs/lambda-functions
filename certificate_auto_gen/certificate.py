@@ -1,12 +1,12 @@
 import boto3
 from botocore.exceptions import ClientError,BotoCoreError
 from response_handler import build_error_response ,build_response,build_simple_response
-
+import config
 
 boto3.setup_default_session(
-    aws_access_key_id='',
-    aws_secret_access_key='',
-    region_name=''
+    aws_access_key_id=config.ACCESS_KEY,
+    aws_secret_access_key=config.SECRET_KEY,
+    region_name=config.REGION
 )
 
 # Now, you can create any boto3 client or resource

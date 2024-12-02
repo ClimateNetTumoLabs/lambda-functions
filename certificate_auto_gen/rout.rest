@@ -2,5 +2,8 @@ POST  https://ze0hor39xk.execute-api.us-east-1.amazonaws.com/default/certificate
 Content-Type: application/json
 
 {
-"thingName": "Device33","delete":true
+"thingName": "Device36","delete":true
 }
+
+###
+GET https://ze0hor39xk.execute-api.us-east-1.amazonaws.com/default/certificate_automation
