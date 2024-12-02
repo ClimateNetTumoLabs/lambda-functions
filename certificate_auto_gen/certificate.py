@@ -1,20 +1,24 @@
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError,BotoCoreError
+from response_handler import build_error_response ,build_response,build_simple_response
+import config
 
 boto3.setup_default_session(
-    aws_access_key_id='',
-    aws_secret_access_key='',
-    region_name=''
+    aws_access_key_id=config.ACCESS_KEY,
+    aws_secret_access_key=config.SECRET_KEY,
+    region_name=config.REGION
 )
 
 # Now, you can create any boto3 client or resource
 iot_client = boto3.client('iot')
+
 
 def create_keys_and_certificate():
     """Create IoT keys and certificate."""
     try:
         response = iot_client.create_keys_and_certificate(setAsActive=True)
         print(f"Certificate created: {response}")
+        
         return response
     except ClientError as e:
         print(f"Error creating certificate: {e}")
@@ -28,6 +32,7 @@ def attach_certificate_to_thing(thing_name, certificate_arn):
             principal=certificate_arn
         )
         print(f"Certificate attached to Thing: {thing_name}")
+        attach_policy_to_thing(certificate_arn,"WeatherStationDevicePolicy")
     except ClientError as e:
         print(f"Error attaching certificate to thing: {e}")
         raise e
@@ -42,26 +47,42 @@ def list_thing_principals(thing_name):
         print(f"Error listing thing principals: {e}")
         raise e
         
-def check_or_create_thing(thing_name):
+def check_or_create_thing(thing_name, thing_type=None):
+    """Check if a thing exists, create it if it does not, and optionally set its type."""
     try:
-        # Step 1: Try to describe the Thing to check if it exists
+        # Try to describe the Thing to check if it exists
         response = iot_client.describe_thing(thingName=thing_name)
         print(f"Thing '{thing_name}' exists: {response}")
         return response
 
     except ClientError as e:
-        # Step 2: If the Thing does not exist, create it
+        # If the Thing does not exist, create it
         if e.response['Error']['Code'] == 'ResourceNotFoundException':
             print(f"Thing '{thing_name}' not found, creating a new one.")
-            create_response = iot_client.create_thing(thingName=thing_name)
+            create_params = {
+                'thingName': thing_name
+            }
+            if thing_type:
+                create_params['thingTypeName'] = thing_type
+            
+            create_response = iot_client.create_thing(**create_params)
             print(f"Thing '{thing_name}' created: {create_response}")
             return create_response
         else:
             # If another error occurred, raise it
             raise e
 
-
-import boto3
+def attach_policy_to_thing(arn, policy_name):
+    """Attach an IoT policy to the Thing."""
+    try:
+        iot_client.attach_principal_policy(
+            policyName=policy_name,
+            principal=arn  # Assuming target can accept a thing name; if not, you may need to attach it to the certificate instead
+        )
+        print(f"Policy '{policy_name}' attached to Thing: {arn}")
+    except ClientError as e:
+        print(f"Error attaching policy to thing: {e}")
+        raise e
 
 def list_things():
     things = []
@@ -73,10 +94,54 @@ def list_things():
         else:
             response = iot_client.list_things()
 
-        things.extend(response['things'])
+        for thing in response['things']:
+            if "Device" in thing['thingName']:  # Check if "Device" is part of the name
+                things.append(thing)
+
         next_token = response.get('nextToken')
         
         if not next_token:
             break  # Exit the loop if there's no more data
 
     return things
+    
+def get_ca_certificate(certificate_id):
+    response = iot_client.get_certificate(certificate_id)
+    return response
+    
+def delete_thing_certificate(thingname):
+    try:
+        
+        response = iot_client.list_thing_principals(thingName=thingname)
+        principals = response.get('principals', [])
+        
+        if not principals:
+            print(f"No certificates attached to Thing: {thingname}")
+        else:
+            for principal in principals:
+                
+                certificate_id = principal.split('/')[-1]
+                print(f"Found certificate ID: {certificate_id} for Thing: {thingname}")
+
+                iot_client.detach_thing_principal(
+                    thingName=thingname,
+                    principal=principal
+                )
+                print(f"Detached certificate ID: {certificate_id} from Thing: {thingname}")
+                iot_client.update_certificate(
+                    certificateId=certificate_id,
+                    newStatus='INACTIVE'
+                )
+                print(f"Set certificate ID: {certificate_id} to INACTIVE")                
+                iot_client.delete_certificate(
+                    certificateId=certificate_id,
+                    forceDelete=True  
+                )
+                print(f"Deleted certificate ID: {certificate_id}")
+        iot_client.delete_thing(thingName=thingname)
+        print(f"Deleted Thing: {thingname}")
+        return build_simple_response(f"Deleted Thing: {thingname}",thingname)
+
+    except (BotoCoreError, ClientError) as error:
+        print(f"An error occurred: {error}")
+        return build_error_response(error)
