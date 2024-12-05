@@ -1,53 +1,55 @@
+import json
 import boto3
 from botocore.exceptions import ClientError
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+import os
 import config
+import base64
+from response_handler import build_error_response,build_response,build_simple_response
+
 def lambda_handler(event, context):
+    
+   
+    mail_data = None
+    recipient = None
+    body = event.get('body', '')
+    
+    
+    body = base64.b64decode(body).decode('utf-8')
+    # body_data = json.loads(body)
+    # return build_simple_response("ok",body_data.get('recipient',''))
+
+        # Parse JSON if body exists and is not already a dictionary
+    # if event.get("isBase64Encoded"):
+    #     decoded_body = base64.b64decode(event["body"]).decode("utf-8")
+    # else:
+    #     decoded_body = event["body"]
+        
+        # Parse the JSON from the decoded body
+    body_data = json.loads(body)
+    mail_data = body_data.get('mail_data')
+    recipient = body_data.get('recipient')
+    if(body_data is None or mail_data is None  or recipient is None):
+        return build_error_response({'err' : "body and mail_data is required",'context': {'mail_data':mail_data , 'recipient':recipient}})
+    
     boto3.setup_default_session(
         aws_access_key_id=config.ACCESS_KEY,
         aws_secret_access_key=config.SECRET_KEY,
         region_name=config.REGION
     )
-    ses_client = boto3.client("ses")
-
-    sender = "baboomian53@gmail.com"
-    recipient = event.get("recipient")
-    subject = event.get("subject", "Welcome to ClimateNet!")
-    body_text = event.get("body_text", "Welcome to ClimateNet! We're thrilled to have you.")
-    body_html_template = event.get("body_html")
-
-    if not recipient:
-        return {"statusCode": 400, "body": "Recipient email is required"}
-    
-    if not body_html_template:
-        return {"statusCode": 400, "body": "HTML content is required"}
-
-    # Replace placeholder in the HTML template if exists
-    body_html = body_html_template.replace("{{recipient_email}}", recipient)
-
-    email_params = {
-        "Source": sender,
-        "Destination": {
-            "ToAddresses": [recipient]
-        },
-        "Message": {
-            "Subject": {
-                "Data": subject
-            },
-            "Body": {
-                "Text": {
-                    "Data": body_text
-                },
-                "Html": {
-                    "Data": body_html
-                }
-            }
+    client = boto3.client('sesv2')
+    response = client.send_email(
+    FromEmailAddress=config.SENDER,
+    Destination={
+        'ToAddresses': [recipient]
+    },
+    Content={
+        'Raw': {
+            'Data': mail_data
         }
     }
-
-    try:
-        response = ses_client.send_email(**email_params)
-        print(f"Email sent! Message ID: {response['MessageId']}")
-        return {"statusCode": 200, "body": "Email sent successfully!", "recipient": recipient}
-    except ClientError as e:
-        print(f"Error sending email: {e.response['Error']['Message']}")
-        return {"statusCode": 500, "body": f"Error sending email: {e.response['Error']['Message']}"}
+    )
+    print(response)
+    return build_response("ok 200!",response)

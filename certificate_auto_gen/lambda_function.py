@@ -89,6 +89,7 @@ def lambda_handler(event, context):
         # Encode ZIP as base64 for HTTP response
         zip_buffer.seek(0)
         zip_base64 = base64.b64encode(zip_buffer.read()).decode('utf-8')
+        file = new_thing_name + "_certificates.zip"
 
         # Return the ZIP file for download
         return {
