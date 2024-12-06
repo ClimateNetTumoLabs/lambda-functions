@@ -12,6 +12,21 @@ boto3.setup_default_session(
 # Now, you can create any boto3 client or resource
 iot_client = boto3.client('iot')
 
+def get_max_device_number(device_array):
+    numbers = []
+    
+    for device in device_array:
+        device_name = device.get("thingName", "")
+        numeric_part = device_name.replace("Device", "")
+        
+        if numeric_part.isdigit():  # Only consider valid numbers
+            numbers.append(int(numeric_part))
+    
+    if numbers:
+        return max(numbers)
+    return 0
+
+
 
 def create_keys_and_certificate():
     """Create IoT keys and certificate."""

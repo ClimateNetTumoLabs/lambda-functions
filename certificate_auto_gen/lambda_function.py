@@ -13,6 +13,7 @@ from certificate import (
     attach_policy_to_thing,
     get_ca_certificate,
     delete_thing_certificate,
+    get_max_device_number,
 )
 from response_handler import build_response, build_error_response, build_simple_response
 
@@ -58,10 +59,11 @@ def lambda_handler(event, context):
 
         # List existing things to determine the next device name
         existing_things = list_things()
+        print(existing_things)
         thing_count = len(existing_things)
 
         # Generate new thing name
-        new_thing_name = f"Device{thing_count + 1}"
+        new_thing_name = f"Device{get_max_device_number(existing_things) + 1}"
 
         # Specify the thing type and policy name
         thing_type = "WeatherStationDevices"
@@ -89,19 +91,17 @@ def lambda_handler(event, context):
         # Encode ZIP as base64 for HTTP response
         zip_buffer.seek(0)
         zip_base64 = base64.b64encode(zip_buffer.read()).decode('utf-8')
-        file = new_thing_name + "_certificates.zip"
 
         # Return the ZIP file for download
         return {
             'statusCode': 200,
             'headers': {
-                'Content-Type': 'application/json',
-                'Content-Disposition': 'attachment; filename="certificates.zip"'
+                'Content-Type': 'application/zip',
+                'Content-Disposition': 'attachment; filename="certificates.zip"',
+                'id' : new_thing_name
             },
-            'body': json.dumps({
-                'id': new_thing_name,
-                'zipFile': zip_base64
-            }),
+            'body':  zip_base64,
+            'param':new_thing_name,
             'isBase64Encoded': True
         }
 
