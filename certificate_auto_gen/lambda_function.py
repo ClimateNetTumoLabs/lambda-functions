@@ -63,6 +63,8 @@ def lambda_handler(event, context):
         thing_count = len(existing_things)
 
         # Generate new thing name
+        device_id = get_max_device_number(existing_things) + 1
+        mqtt_endpoint = "a3b2v7yks3ewbi-ats.iot.us-east-1.amazonaws.com"
         new_thing_name = f"Device{get_max_device_number(existing_things) + 1}"
 
         # Specify the thing type and policy name
@@ -78,6 +80,7 @@ def lambda_handler(event, context):
         else:
             return build_error_response(f"Thing: {new_thing_name} already has an attached certificate.")
 
+        enviroment_file = f"DEVICE_ID={device_id}\nLOCAL_DB_DB_NAME=data.db\nMQTT_BROKER_ENDPOINT={mqtt_endpoint}"
         # Create an in-memory ZIP file
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -86,7 +89,7 @@ def lambda_handler(event, context):
             zip_file.writestr("private.pem.key", certificate_response.get('keyPair', {}).get('PrivateKey', ''))
             zip_file.writestr("public.pem.key", certificate_response.get('keyPair', {}).get('PublicKey', ''))
             zip_file.writestr("rootCA.pem", ca_certificate_pem)  # Use the Root CA certificate
-            zip_file.writestr("deviceID.txt", new_thing_name)
+            zip_file.writestr("env.txt", enviroment_file)
 
         # Encode ZIP as base64 for HTTP response
         zip_buffer.seek(0)
