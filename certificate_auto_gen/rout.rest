@@ -1,0 +1,9 @@
+POST  https://ze0hor39xk.execute-api.us-east-1.amazonaws.com/default/certificate_automation 
+Content-Type: application/json
+
+{
+"thingName": "Device41","delete":true
+}
+
+###
+GET https://ze0hor39xk.execute-api.us-east-1.amazonaws.com/default/certificate_automation

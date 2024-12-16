@@ -1,0 +1,2 @@
+Lambda function executed successfully!
+Response: {'message': 'ok 200!', 'res': {'ResponseMetadata': {'RequestId': 'a718685b-3b44-41c4-8c5a-32e45ffde473', 'HTTPStatusCode': 200, 'HTTPHeaders': {'date': 'Mon, 02 Dec 2024 10:12:31 GMT', 'content-type': 'application/json', 'content-length': '76', 'connection': 'keep-alive', 'x-amzn-requestid': 'a718685b-3b44-41c4-8c5a-32e45ffde473'}, 'RetryAttempts': 0}, 'MessageId': '0100019386db7c10-2bf218df-9003-4d8d-9a4f-b69b37b676f7-000000'}}
