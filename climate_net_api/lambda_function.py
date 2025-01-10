@@ -200,7 +200,7 @@ def lambda_handler(event, context):
 
         return {
             'statusCode': 200,
-            'body': json.dumps({'data': data}, default=str)
+            'body': json.dumps({'keys' : ["id","timestamp","uv","lux","temprature","pressure" ,"humidity" , "pm1" ,"pm2_5","pm10","speed" ,"rain"],'data': data}, default=str)
         }
     except Exception as e:
         print(e)
