@@ -7,3 +7,5 @@ Content-Type: application/json
 
 ###
 GET https://ze0hor39xk.execute-api.us-east-1.amazonaws.com/default/certificate_automation
+###
+GET https://oe4ok52utf.execute-api.us-east-1.amazonaws.com/default/TestLambda
