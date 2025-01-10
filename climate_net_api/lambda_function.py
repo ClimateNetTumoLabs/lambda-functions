@@ -20,7 +20,36 @@ import psycopg2
 import json
 from datetime import datetime, timedelta
 import config
+import urllib.request
+import urllib.request
+import pytz
 
+
+def get_timezone(ip: str) -> str:
+    """
+    Get the current time in the timezone of the given IP address.
+
+    Args:
+        ip (str): The IP address to lookup.
+
+    Returns:
+        str: The current time in the format 'YYYY-MM-DD HH:MM:SS' if found, otherwise None.
+    """
+    url = f"http://ipinfo.io/{ip}/json"
+    try:
+
+        with urllib.request.urlopen(url) as response:
+            data = json.loads(response.read().decode())
+        
+        timezone = data.get('timezone')
+        if not timezone:
+            return None
+        
+        tz = pytz.timezone(timezone)
+        current_time = datetime.now(tz)
+        return current_time
+    except Exception:
+        return None
 
 def connect_to_db():
     """
@@ -44,7 +73,7 @@ def connect_to_db():
         raise RuntimeError("Failed to connect to the database") from e
 
 
-def get_data_by_date(device_id, connection, start_time=None, end_time=None):
+def get_data_by_date(device_id, connection, start_time=None, end_time=None , ip = None):
     """
     Retrieves data from the database for a specific device within a given time range.
 
@@ -62,9 +91,11 @@ def get_data_by_date(device_id, connection, start_time=None, end_time=None):
     """
     try:
         if not start_time or not end_time:
-            now = datetime.utcnow()
-            start_time = now.strftime('%Y-%m-%d')
-            end_time = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+            now = get_timezone(ip=ip)
+            if now is None:
+                now = datetime.utcnow()
+            start_time = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+            end_time = now.strftime('%Y-%m-%d %H:%M:%S')
         else:
             end_time = (datetime.strptime(end_time, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
 
@@ -76,6 +107,7 @@ def get_data_by_date(device_id, connection, start_time=None, end_time=None):
         return data
 
     except Exception as e:
+        print(e)
         raise RuntimeError(f"Failed to fetch data for device {device_id}") from e
 
 
@@ -149,7 +181,7 @@ def lambda_handler(event, context):
 
     try:
         query_params = event.get('queryStringParameters', {})
-
+        ip = event['requestContext']['http']['sourceIp']
         validation_result = validate_params(query_params)
 
         if 'statusCode' in validation_result:
@@ -164,7 +196,7 @@ def lambda_handler(event, context):
         if start_time and end_time:
             data = get_data_by_date(device, connection, start_time, end_time)
         else:
-            data = get_data_by_date(device, connection)
+            data = get_data_by_date(device, connection,ip=ip)
 
         return {
             'statusCode': 200,
