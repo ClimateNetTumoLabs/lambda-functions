@@ -1,18 +1,21 @@
+# Use an official Python image
+FROM python:3.9-slim
 
-FROM python:3.10
-
+# Set working directory
 WORKDIR /app
 
+# Install required system packages
+RUN apt-get update && apt-get install -y \
+    python3-venv \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files into the container
 COPY . .
 
-RUN python3 -m venv venv && \
-    . venv/bin/activate && \
-    pip install --upgrade pip && \
-    pip install -r requirements.txt && \
-    deactivate && \
-    cd venv/lib/$(ls venv/lib | grep python)/site-packages && \
-    zip -r9 /app/lambda_function.zip . && \
-    cd /app && \
-    zip -g lambda_function.zip lambda_function.py config.py
+# Set executable permissions for the deployment script
+RUN chmod +x lambda_deploy.sh
 
+# Default command to run the deployment script
+CMD ["./lambda_deploy.sh"]
 
