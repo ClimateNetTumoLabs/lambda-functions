@@ -8,4 +8,4 @@ Content-Type: application/json
 ###
 GET https://ze0hor39xk.execute-api.us-east-1.amazonaws.com/default/certificate_automation
 ###
-GET https://oe4ok52utf.execute-api.us-east-1.amazonaws.com/default/TestLambda
+GET https://emvnh9buoh.execute-api.us-east-1.amazonaws.com/getData?device_id=8&start_time=2024-01-01&&;DROP%20TABLE%20users;%20--&end_time=2024-01-02
