@@ -2,20 +2,24 @@ import io
 import json
 import base64
 import zipfile
-import urllib.request # Add the requests library
+import urllib.request
+import config
 from botocore.exceptions import ClientError
 from certificate import (
     create_keys_and_certificate,
     attach_certificate_to_thing,
     list_thing_principals,
     check_or_create_thing,
-    list_things,
     attach_policy_to_thing,
     get_ca_certificate,
     delete_thing_certificate,
-    get_max_device_number,
 )
-from response_handler import build_response, build_error_response, build_simple_response
+from response_handler import (
+    build_response,
+    build_error_response,
+    build_simple_response,
+    build_bad_request_response,
+)
 
 def fetch_amazon_root_ca():
     """
@@ -37,78 +41,96 @@ def lambda_handler(event, context):
             if isinstance(body, str):
                 body = json.loads(body)
 
+        http_method = event.get('httpMethod', '')
         delete = body.get('delete') if body else None
         thing_name = body.get('thingName') if body else None
 
-        if event.get('httpMethod') == "POST":
+        # ------------------------------------------------------------------
+        # POST — delete or create
+        # ------------------------------------------------------------------
+        if http_method == "POST":
+            # Delete flow
             if delete:
                 if thing_name:
                     return delete_thing_certificate(thing_name)
-                return build_error_response("Thing name is empty!")
+                return build_bad_request_response("thingName is required for deletion.")
 
-        certificate_response = create_keys_and_certificate()
+            # Create flow — thingName is required
+            if not thing_name:
+                return build_bad_request_response(
+                    "thingName is required. Send {'thingName': 'UserDevice123456'}."
+                )
 
-        # Retrieve CA certificate
-        
-        root_ca_response = fetch_amazon_root_ca()
+            return _create_thing_and_certificate(thing_name)
 
-        # if root_ca_response.status_code == 200:
-        ca_certificate_pem = root_ca_response
-        # else:
-            # return build_error_response(f"Failed to download Root CA. HTTP Status Code: {root_ca_response.status_code}")
-
-        # List existing things to determine the next device name
-        existing_things = list_things()
-        print(existing_things)
-        thing_count = len(existing_things)
-
-        # Generate new thing name
-        device_id = get_max_device_number(existing_things) + 1
-        mqtt_endpoint = "a3b2v7yks3ewbi-ats.iot.us-east-1.amazonaws.com"
-        new_thing_name = f"Device{get_max_device_number(existing_things) + 1}"
-
-        # Specify the thing type and policy name
-        thing_type = "WeatherStationDevices"
-        policy_name = "WeatherStationDevicePolicy"
-
-        # Check or create the thing
-        check_or_create_thing(new_thing_name, thing_type)
-        attached_principals = list_thing_principals(new_thing_name)
-
-        if not attached_principals:
-            attach_certificate_to_thing(new_thing_name, certificate_response['certificateArn'])
-        else:
-            return build_error_response(f"Thing: {new_thing_name} already has an attached certificate.")
-
-        enviroment_file = f"DEVICE_ID={device_id}\nLOCAL_DB_DB_NAME=data.db\nMQTT_BROKER_ENDPOINT={mqtt_endpoint}"
-        # Create an in-memory ZIP file
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Write certificate, keys, and device ID to files with specified names
-            zip_file.writestr("certificate.pem.crt", certificate_response.get('certificatePem', ''))
-            zip_file.writestr("private.pem.key", certificate_response.get('keyPair', {}).get('PrivateKey', ''))
-            zip_file.writestr("public.pem.key", certificate_response.get('keyPair', {}).get('PublicKey', ''))
-            zip_file.writestr("rootCA.pem", ca_certificate_pem)  # Use the Root CA certificate
-            zip_file.writestr("env.txt", enviroment_file)
-
-        # Encode ZIP as base64 for HTTP response
-        zip_buffer.seek(0)
-        zip_base64 = base64.b64encode(zip_buffer.read()).decode('utf-8')
-
-        # Return the ZIP file for download
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/zip',
-                'Content-Disposition': 'attachment; filename="certificates.zip"',
-                'id' : new_thing_name
-            },
-            'body':  zip_base64,
-            'param':new_thing_name,
-            'isBase64Encoded': True
-        }
+        # ------------------------------------------------------------------
+        # Any other method — unsupported
+        # ------------------------------------------------------------------
+        return build_bad_request_response(
+            "Unsupported HTTP method. Use POST with a JSON body."
+        )
 
     except ClientError as e:
         return build_error_response(e)
     except Exception as e:
         return build_error_response(str(e))
+
+
+def _create_thing_and_certificate(new_thing_name):
+    """Create an AWS IoT Thing, generate certificates, and return a ZIP."""
+
+    # Extract the numeric suffix for the device ID (e.g. "UserDevice643781" → "643781")
+    device_id = ''.join(filter(str.isdigit, new_thing_name)) or new_thing_name
+
+    certificate_response = create_keys_and_certificate()
+
+    # Retrieve Root CA certificate
+    ca_certificate_pem = fetch_amazon_root_ca()
+
+    # Specify the thing type and policy name
+    thing_type = "WeatherStationDevices"
+
+    # Check or create the thing
+    check_or_create_thing(new_thing_name, thing_type)
+    attached_principals = list_thing_principals(new_thing_name)
+
+    if attached_principals:
+        return build_error_response(
+            f"Thing: {new_thing_name} already has an attached certificate."
+        )
+
+    attach_certificate_to_thing(new_thing_name, certificate_response['certificateArn'])
+
+    environment_file = (
+        f"DEVICE_ID={device_id}\n"
+        f"MQTT_TOPIC={config.MQTT_TOPIC}\n"
+        f"MQTT_BROKER_ENDPOINT={config.MQTT_ENDPOINT}\n\n"
+        f"#Custom database names must include the .json extension, for example: local_data.json\n"
+        f"LOCAL_DB="
+    )
+
+    # Create an in-memory ZIP file
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("certificates/certificate.pem.crt", certificate_response.get('certificatePem', ''))
+        zip_file.writestr("certificates/private.pem.key", certificate_response.get('keyPair', {}).get('PrivateKey', ''))
+        zip_file.writestr("certificates/public.pem.key", certificate_response.get('keyPair', {}).get('PublicKey', ''))
+        zip_file.writestr("certificates/rootCA.pem", ca_certificate_pem)
+        zip_file.writestr(".env", environment_file)
+
+    # Encode ZIP as base64 for HTTP response
+    zip_buffer.seek(0)
+    zip_base64 = base64.b64encode(zip_buffer.read()).decode('utf-8')
+
+    # Return the ZIP file for download
+    return {
+        'statusCode': 200,
+        'headers': {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': f'attachment; filename="{new_thing_name}_credentials.zip"',
+            'id': new_thing_name
+        },
+        'body': zip_base64,
+        'param': new_thing_name,
+        'isBase64Encoded': True
+    }

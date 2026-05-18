@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>ClimateNet</title>
+        <style>
+            /* ClimateNet Identity */
+            :root {
+                --bg-color: #efefef;
+                --green-dark: #0a8e62;
+                --green-dark-hover: #087a52;
+                --neutral-900: #010101;
+                --neutral-700: #333232;
+                --neutral-500: #6b7280;
+                --neutral-200: #e5e7eb;
+            }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                margin: 0;
+                padding: 40px 20px;
+                background-color: #efefef;
+                color: #333232;
+            }
+            .wrapper {
+                max-width: 600px;
+                margin: 0 auto;
+                background-color: #ffffff;
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+                border: 1px solid #e5e7eb;
+            }
+            .header {
+                height: 120px;
+                background-image: url("https://climatenet.am/statics/mail/banner.jpg?v={{cache_buster}}");
+                background-size: cover;
+                background-position: left center;
+            }
+            .content {
+                padding: 40px;
+            }
+            .greeting {
+                font-size: 20px;
+                font-weight: 600;
+                margin-top: 0;
+                margin-bottom: 20px;
+                color: #010101;
+            }
+            .message {
+                font-size: 16px;
+                line-height: 1.6;
+                margin-bottom: 20px;
+                color: #333232;
+            }
+            .signature {
+                margin-top: 40px;
+                font-size: 15px;
+                color: #333232;
+                line-height: 1.5;
+            }
+            .btn {
+                display: inline-block;
+                padding: 12px 24px;
+                background-color: #0a8e62;
+                color: #ffffff !important;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: 600;
+                margin-top: 10px;
+                margin-bottom: 10px;
+                text-align: center;
+            }
+            .btn:hover {
+                background-color: #087a52;
+            }
+            @media (max-width: 600px) {
+                .content {
+                    padding: 25px;
+                }
+                .header {
+                    height: 100px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wrapper">
+            <div class="header"></div>
+            <div class="content">
+                {{content}}
+
+                <div class="signature">
+                    Best regards,<br />
+                    <strong>The ClimateNet Team</strong>
+
+                    <br />
+                    <br />
+                    <table cellpadding="0" cellspacing="0" border="0" style="font-family: Arial, sans-serif; max-width: 420px; width: 100%">
+                        <tr>
+                            <td style="border-bottom: 1px solid #aaaaaa; padding-bottom: 8px"></td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px 0 4px 0; vertical-align: middle">
+                                <span style="font-family: Arial, sans-serif; font-size: 20px; color: #0a8e62; font-weight: bold; vertical-align: middle; line-height: 1">Climate</span
+                                ><img src="https://climatenet.am/media/Logos/globe.svg" alt="Globe" width="22" height="22" style="vertical-align: middle; margin: 0 4px; display: inline-block" /><span
+                                    style="font-family: Arial, sans-serif; font-size: 20px; color: #0a8e62; font-weight: normal; vertical-align: middle; line-height: 1"
+                                    >Net</span
+                                >
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding-top: 10px; font-size: 11px; color: #888888">
+                                <div style="margin-bottom: 4px">
+                                    <a href="mailto:labs@tumo.org" style="color: #888888; text-decoration: none">labs@tumo.org</a>
+                                </div>
+                                <div style="margin-bottom: 4px">
+                                    <a href="https://climatenet.am/" style="color: #888888; text-decoration: none">climatenet.am</a>
+                                </div>
+                                <div>
+                                    <a href="https://www.google.com/maps/search/TUMO+Labs" style="color: #888888; text-decoration: none">Halabyan 2A | Yerevan, Armenia</a>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

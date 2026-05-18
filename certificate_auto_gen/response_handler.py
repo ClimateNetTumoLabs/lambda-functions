@@ -27,6 +27,16 @@ def build_simple_response(message, response):
         })
     }
 
+def build_bad_request_response(message):
+    """Build a 400 bad-request response."""
+    return {
+        'statusCode': 400,
+        'body': json.dumps({
+            'message': message,
+        })
+    }
+
+
 def build_error_response(error):
     """Build an error response."""
     return {

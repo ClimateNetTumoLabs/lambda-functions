@@ -12,21 +12,6 @@ boto3.setup_default_session(
 # Now, you can create any boto3 client or resource
 iot_client = boto3.client('iot')
 
-def get_max_device_number(device_array):
-    numbers = []
-    
-    for device in device_array:
-        device_name = device.get("thingName", "")
-        numeric_part = device_name.replace("Device", "")
-        
-        if numeric_part.isdigit():  # Only consider valid numbers
-            numbers.append(int(numeric_part))
-    
-    if numbers:
-        return max(numbers)
-    return 0
-
-
 
 def create_keys_and_certificate():
     """Create IoT keys and certificate."""
@@ -99,26 +84,6 @@ def attach_policy_to_thing(arn, policy_name):
         print(f"Error attaching policy to thing: {e}")
         raise e
 
-def list_things():
-    things = []
-    next_token = None
-
-    while True:
-        if next_token:
-            response = iot_client.list_things(nextToken=next_token)
-        else:
-            response = iot_client.list_things()
-
-        for thing in response['things']:
-            if "Device" in thing['thingName']:  # Check if "Device" is part of the name
-                things.append(thing)
-
-        next_token = response.get('nextToken')
-        
-        if not next_token:
-            break  # Exit the loop if there's no more data
-
-    return things
     
 def get_ca_certificate(certificate_id):
     response = iot_client.get_certificate(certificate_id)
