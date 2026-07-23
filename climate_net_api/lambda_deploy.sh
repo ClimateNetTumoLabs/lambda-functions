@@ -27,5 +27,4 @@ cd venv/lib/"$PYTHON_VERSION"/site-packages || exit
 zip -r9 "${OLDPWD}"/lambda_function.zip .
 cd "$OLDPWD" || exit
 zip -g lambda_function.zip lambda_function.py
-zip -g lambda_function.zip config.py
 

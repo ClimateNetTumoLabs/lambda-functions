@@ -12,44 +12,105 @@ Dependencies:
     - psycopg2: PostgreSQL adapter for Python.
     - json: JSON serialization and deserialization.
     - datetime: Date and time manipulation.
-    - timedelta: Time duration calculation.
-    - config: Module containing database connection configuration.
+
+Configuration comes from environment variables: DB_HOST, DB_USER, DB_PASSWORD,
+DB_NAME and the optional DB_SSLMODE.
 """
 
-import psycopg2
+import base64
+import gzip
 import json
+import os
 from datetime import datetime, timedelta
-import config
-import urllib.request
-import urllib.request
-import pytz
+
+import psycopg2
+from psycopg2 import sql
+
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+}
+
+# KEYS[i] labels COLUMNS[i]. Selecting these explicitly rather than SELECT *
+# keeps the two from drifting apart when a column is added to the table.
+KEYS = ["id", "timestamp", "uv", "lux", "temperature", "pressure", "humidity",
+        "pm1", "pm2_5", "pm10", "wind speed", "rain", "wind direction"]
+
+# Rounding and formatting in SQL rather than Python halves the payload for
+# identical data and avoids building a Python object per value. The ::float8
+# casts matter: round() alone returns Decimal, which serializes as a JSON
+# *string* and would change the response contract.
+COLUMNS = sql.SQL(', ').join([
+    sql.SQL('id'),
+    sql.SQL("to_char(time, 'YYYY-MM-DD HH24:MI:SS')"),
+    sql.SQL('round(uv::numeric, 2)::float8'),
+    sql.SQL('round(lux::numeric, 2)::float8'),
+    sql.SQL('round(temperature::numeric, 2)::float8'),
+    sql.SQL('pressure'),
+    sql.SQL('humidity'),
+    sql.SQL('pm1'),
+    sql.SQL('pm2_5'),
+    sql.SQL('pm10'),
+    sql.SQL('round(speed::numeric, 2)::float8'),
+    sql.SQL('round(rain::numeric, 2)::float8'),
+    sql.SQL('direction'),
+])
+
+# Lambda rejects a response payload over 6,291,556 bytes. That is measured on
+# the whole JSON document the runtime returns, so the envelope keys and the
+# escaping of every quote inside `body` count against it too.
+LAMBDA_PAYLOAD_LIMIT = 6291556
+# Past this, gzip the body. Level 6 is deliberate: at ~172k rows level 1 lands
+# at 6.63 MB base64 (over the limit) and level 6 at 5.83 MB, in 0.57s.
+GZIP_THRESHOLD = 5000000
+GZIP_LEVEL = 6
+# Refuse before fetching rather than running out of memory mid-request. A row
+# costs ~890 bytes resident, so 300k rows is already ~270 MB.
+MAX_ROWS = 300000
+
+# API Gateway abandons the integration at 30s; fail in the DB before that.
+STATEMENT_TIMEOUT_MS = 20000
 
 
-def get_timezone(ip: str) -> str:
-    """
-    Get the current time in the timezone of the given IP address.
+def _response(status_code, payload):
+    """Builds an API Gateway proxy response, compressing oversized bodies."""
+    body = json.dumps(payload, separators=(',', ':'))
+    headers = dict(CORS_HEADERS)
 
-    Args:
-        ip (str): The IP address to lookup.
+    if len(body) < GZIP_THRESHOLD:
+        return {'statusCode': status_code, 'headers': headers, 'body': body}
 
-    Returns:
-        str: The current time in the format 'YYYY-MM-DD HH:MM:SS' if found, otherwise None.
-    """
-    url = f"http://ipinfo.io/{ip}/json"
-    try:
+    # Triggered by size, not by Accept-Encoding: curl sends no Accept-Encoding
+    # by default, so negotiating would send the common case down the
+    # uncompressed path and straight into the payload limit.
+    headers['Content-Encoding'] = 'gzip'
+    compressed = base64.b64encode(
+        gzip.compress(body.encode(), GZIP_LEVEL)).decode()
 
-        with urllib.request.urlopen(url) as response:
-            data = json.loads(response.read().decode())
-        
-        timezone = data.get('timezone')
-        if not timezone:
-            return None
-        
-        tz = pytz.timezone(timezone)
-        current_time = datetime.now(tz)
-        return current_time
-    except Exception:
-        return None
+    response = {'statusCode': status_code, 'headers': headers,
+                'body': compressed, 'isBase64Encoded': True}
+
+    if len(json.dumps(response)) >= LAMBDA_PAYLOAD_LIMIT:
+        return _error(413, 'Response too large even compressed. '
+                           'Request a narrower date range.')
+
+    return response
+
+
+def _error(status_code, message):
+    """Builds an error response. Never compressed, so it cannot recurse."""
+    return {
+        'statusCode': status_code,
+        'headers': dict(CORS_HEADERS),
+        'body': json.dumps({'error': message})
+    }
+
+
+def _is_integer(value):
+    """True for plain ASCII integers. str.isdigit() alone accepts '²' and '٣'."""
+    value = str(value)
+    return value.isascii() and value.isdigit()
+
 
 def connect_to_db():
     """
@@ -59,56 +120,92 @@ def connect_to_db():
         psycopg2.extensions.connection: A connection object to the database.
 
     Raises:
-        RuntimeError: If connection to the database fails.
+        RuntimeError: If configuration is missing or the connection fails.
     """
+    settings = {name: os.environ.get(name) for name in
+                ('DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME')}
+    # DB_PASSWORD only has to be present, not non-empty: trust and peer auth
+    # legitimately use a blank password.
+    missing = [name for name, value in settings.items()
+               if value is None or (not value and name != 'DB_PASSWORD')]
+    if missing:
+        raise RuntimeError(
+            f"Missing environment variable(s): {', '.join(missing)}")
+
     try:
-        connection = psycopg2.connect(
-            host=config.HOST,
-            user=config.USER,
-            password=config.PASSWORD,
-            database=config.DB_NAME
+        return psycopg2.connect(
+            host=settings['DB_HOST'],
+            user=settings['DB_USER'],
+            password=settings['DB_PASSWORD'],
+            database=settings['DB_NAME'],
+            connect_timeout=5,
+            # libpq defaults to 'prefer', which silently falls back to
+            # plaintext if the TLS handshake fails.
+            sslmode=os.environ.get('DB_SSLMODE', 'require')
         )
-        return connection
     except Exception as e:
         raise RuntimeError("Failed to connect to the database") from e
 
 
-def get_data_by_date(device_id, connection, start_time=None, end_time=None , ip = None):
+def get_data_by_date(device, connection, start_time=None, end_time=None):
     """
-    Retrieves data from the database for a specific device within a given time range.
+    Retrieves data from the database for a specific device within a time range.
 
     Args:
-        device_id (int): The ID of the device.
+        device (str): The device table name, e.g. 'device8'.
         connection (psycopg2.extensions.connection): The database connection object.
-        start_time (str, optional): The start time of the data range in 'YYYY-MM-DD' format. Defaults to None.
-        end_time (str, optional): The end time of the data range in 'YYYY-MM-DD' format. Defaults to None.
+        start_time (str, optional): Start of the range, 'YYYY-MM-DD'. Defaults to None.
+        end_time (str, optional): End of the range, 'YYYY-MM-DD'. Defaults to None.
 
     Returns:
-        list: A list of tuples containing the fetched data.
+        list: A list of tuples containing the fetched data, or None if the
+              range holds more rows than can be returned.
 
     Raises:
         RuntimeError: If fetching data from the database fails.
     """
+    table = sql.Identifier(device)
+
+    if start_time and end_time:
+        end_time = (datetime.strptime(end_time, '%Y-%m-%d')
+                    + timedelta(days=1)).strftime('%Y-%m-%d')
+        where = sql.SQL('time BETWEEN %s AND %s')
+        params = (start_time, end_time)
+    else:
+        # Anchored to the newest reading rather than the caller's clock, so it
+        # needs no assumption about which timezone devices report in. As a
+        # subquery it is one round trip, and an empty table yields no rows by
+        # construction instead of raising on None.
+        where = sql.SQL(
+            'time > (SELECT max(time) FROM {}) - interval \'24 hours\''
+        ).format(table)
+        params = ()
+
     try:
-        if not start_time or not end_time:
-            now = get_timezone(ip=ip)
-            if now is None:
-                now = datetime.utcnow()
-            start_time = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-            end_time = now.strftime('%Y-%m-%d %H:%M:%S')
-        else:
-            end_time = (datetime.strptime(end_time, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
-
         with connection.cursor() as cursor:
-            query = f'SELECT * FROM {device_id} WHERE time BETWEEN %s AND %s'
-            cursor.execute(query, (start_time, end_time))
-            data = cursor.fetchall()
+            cursor.execute(sql.SQL('SET LOCAL statement_timeout = {}')
+                           .format(sql.Literal(STATEMENT_TIMEOUT_MS)))
 
-        return data
+            # Counting first turns an impossible request into a fast 413
+            # instead of an out-of-memory kill part way through fetchall().
+            cursor.execute(
+                sql.SQL('SELECT count(*) FROM {table} WHERE {where}')
+                .format(table=table, where=where), params)
+            if cursor.fetchone()[0] > MAX_ROWS:
+                return None
+
+            # ORDER BY is required, not cosmetic: without it Postgres switches
+            # to a parallel sequential scan on wide ranges and the workers
+            # return rows interleaved.
+            cursor.execute(
+                sql.SQL('SELECT {columns} FROM {table} WHERE {where} '
+                        'ORDER BY time, id')
+                .format(columns=COLUMNS, table=table, where=where), params)
+            return cursor.fetchall()
 
     except Exception as e:
         print(e)
-        raise RuntimeError(f"Failed to fetch data for device {device_id}") from e
+        raise RuntimeError(f"Failed to fetch data for device {device}") from e
 
 
 def validate_params(query_params):
@@ -119,48 +216,38 @@ def validate_params(query_params):
         query_params (dict): A dictionary containing the query parameters.
 
     Returns:
-        dict: A dictionary containing the validated parameters or an error response.
-
-    Raises:
-        ValueError: If device_id is not an integer.
-        RuntimeError: If start_time and end_time are provided but have invalid format, or if both are missing.
+        dict: The validated parameters, or an API Gateway error response if the
+              parameters are rejected (identified by a 'statusCode' key).
     """
+    # API Gateway sends queryStringParameters: null when the URL has no query.
+    query_params = query_params or {}
+
     device_id = query_params.get('device_id')
     if not device_id:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': 'Missing device_id parameter'})
-        }
+        return _error(400, 'Missing device_id parameter')
 
-    if not (isinstance(device_id, int) or device_id.isdigit()):
-        return {
-            'statusCode': 400,
-            'body': json.dumps(
-                {'error': 'Invalid format for device_id. It must be an integer.'}
-            )
-        }
+    if not _is_integer(device_id):
+        return _error(400, 'Invalid format for device_id. It must be an integer.')
 
     start_time = query_params.get('start_time')
     end_time = query_params.get('end_time')
 
     if start_time and end_time:
         try:
-            datetime.strptime(start_time, '%Y-%m-%d')
-            datetime.strptime(end_time, '%Y-%m-%d')
+            start = datetime.strptime(start_time, '%Y-%m-%d')
+            end = datetime.strptime(end_time, '%Y-%m-%d')
         except ValueError:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Invalid date format. It must be YYYY-MM-DD.'})
-            }
+            return _error(400, 'Invalid date format. It must be YYYY-MM-DD.')
 
-        return {'device': f'device{device_id}', 'start_time': start_time, 'end_time': end_time}
+        if start > end:
+            return _error(400, 'start_time must not be after end_time')
+
+        return {'device': f'device{device_id}',
+                'start_time': start_time, 'end_time': end_time}
     elif not start_time and not end_time:
         return {'device': f'device{device_id}'}
     else:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({'error': 'Both start_time and end_time must be provided'})
-        }
+        return _error(400, 'Both start_time and end_time must be provided')
 
 
 def lambda_handler(event, context):
@@ -173,38 +260,36 @@ def lambda_handler(event, context):
 
     Returns:
         dict: A dictionary containing the HTTP response.
-
-    Raises:
-        RuntimeError: If an error occurs during the execution of the function.
     """
     connection = None
 
     try:
-        query_params = event.get('queryStringParameters', {})
-        ip = event['requestContext']['http']['sourceIp']
-        validation_result = validate_params(query_params)
+        validation_result = validate_params(event.get('queryStringParameters'))
 
         if 'statusCode' in validation_result:
             return validation_result
 
-        device = validation_result['device']
-        start_time = validation_result.get('start_time')
-        end_time = validation_result.get('end_time')
-
         connection = connect_to_db()
 
-        if start_time and end_time:
-            data = get_data_by_date(device, connection, start_time, end_time)
-        else:
-            data = get_data_by_date(device, connection,ip=ip)
+        data = get_data_by_date(
+            validation_result['device'],
+            connection,
+            validation_result.get('start_time'),
+            validation_result.get('end_time')
+        )
 
-        return {
-            'statusCode': 200,
-            'body': json.dumps({'keys' : ["id","timestamp","uv","lux","temprature","pressure" ,"humidity" , "pm1" ,"pm2_5","pm10","speed" ,"rain"],'data': data}, default=str)
-        }
+        if data is None:
+            return _error(413, f'Range holds more than {MAX_ROWS} readings. '
+                               'Request a narrower date range.')
+
+        return _response(200, {'keys': KEYS, 'data': data})
+
     except Exception as e:
+        # Logged, not returned: database errors quote the failing query and
+        # schema. Returned through _error so the CORS headers survive, which a
+        # re-raise would not do.
         print(e)
-        raise RuntimeError("Server error occurred while fetching data from the database.") from e
+        return _error(500, 'Server error occurred while fetching data from the database.')
     finally:
         if connection:
             connection.close()
