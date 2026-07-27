@@ -64,24 +64,34 @@ Handler stays `lambda_function.lambda_handler`.
 
 **Configuration → Environment variables → Edit**.
 
-| Variable      | Required | Default   |
-| :------------ | :------- | :-------- |
-| `DB_HOST`     | yes      | —         |
-| `DB_USER`     | yes      | —         |
-| `DB_PASSWORD` | yes      | —         |
-| `DB_NAME`     | yes      | —         |
-| `DB_SSLMODE`  | no       | `require` |
+| Variable            | Required        | Default                            |
+| :------------------ | :-------------- | :--------------------------------- |
+| `DB_HOST`           | for `/getData`  | —                                  |
+| `DB_USER`           | for `/getData`  | —                                  |
+| `DB_PASSWORD`       | for `/getData`  | —                                  |
+| `DB_NAME`           | for `/getData`  | —                                  |
+| `DB_SSLMODE`        | no              | `require`                          |
+| `BOT_SHARED_SECRET` | for `/getDevices` | —                                |
+| `DEVICES_URL`       | no              | `https://climatenet.am/api/list/`  |
 
 A missing variable produces a 500 naming it in CloudWatch.
+
+`BOT_SHARED_SECRET` must match the value of the same name in the Django
+backend's environment. Django gates the device list on a `Referer`/`Origin`
+allowlist or on this secret, and a Lambda sends neither header.
 
 ## 5. Connect API Gateway
 
 **Develop → Routes → Create**: method `GET`, path `/getData`, then
 **Attach integration → Lambda function**, payload format **2.0**.
 
+Repeat for `/getDevices`, attaching the **same** integration — one function
+serves both routes.
+
 ## 6. Add test events
 
-**Test → Create new event**. Only `queryStringParameters` affects the result.
+**Test → Create new event**. For `/getData`, only `queryStringParameters`
+affects the result; for `/getDevices`, only `rawPath`.
 
 <details>
 <summary><code>default-window</code> → 200, ~1 day of rows</summary>
@@ -155,6 +165,24 @@ A missing variable produces a 500 naming it in CloudWatch.
 
 </details>
 
+<details>
+<summary><code>devices</code> → 200, the public device list</summary>
+
+```json
+{
+    "version": "2.0",
+    "routeKey": "GET /getDevices",
+    "rawPath": "/getDevices",
+    "rawQueryString": "",
+    "headers": { "accept": "*/*" },
+    "queryStringParameters": null,
+    "requestContext": { "apiId": "<api-id>", "http": { "method": "GET", "path": "/getDevices", "protocol": "HTTP/1.1", "sourceIp": "1.1.1.1", "userAgent": "curl/8.4.0" }, "routeKey": "GET /getDevices", "stage": "$default" },
+    "isBase64Encoded": false
+}
+```
+
+</details>
+
 On `wide-range` the console shows base64 gibberish — that is the gzip working,
 not a failure. Check **Duration** < 30,000 ms and **Max memory used** < 1024 MB.
 
@@ -168,7 +196,70 @@ https://<api-id>.execute-api.us-east-1.amazonaws.com/getData?device_id=8&start_t
 
 # API
 
-`GET /getData`
+Two routes, one Lambda.
+
+## `GET /getDevices`
+
+The public device list — which `device_id` values `/getData` will accept. Takes
+no parameters.
+
+```json
+[
+    {
+        "id": 1,
+        "generated_id": 8,
+        "location": "V. Sargsyan",
+        "location_en": "V. Sargsyan",
+        "location_hy": "Վ․ Սարգսյան",
+        "region": "Yerevan",
+        "region_en": "Yerevan",
+        "region_hy": "Երևան",
+        "country": "Armenia",
+        "country_en": "Armenia",
+        "country_hy": "Հայաստան",
+        "latitude": "40.185285",
+        "longitude": "44.560020",
+        "LTR390": "valid",
+        "BME280": "valid",
+        "PMS5003": "valid",
+        "Wind": "valid",
+        "Rainfall": "valid",
+        "Status": "online",
+        "last_updated": "2026-07-27T12:54:17.510741+04:00",
+        "created_at": "2023-11-16T16:32:00+04:00",
+        "issues": []
+    }
+]
+```
+
+Pass `generated_id` to `/getData` as `device_id`.
+
+Unlike `/getData`, this data does **not** come from RDS — there is no device
+registry in the database. The Lambda fetches it from the Django backend
+(`DEVICES_URL`) using `BOT_SHARED_SECRET`, and copies out the fields above.
+
+> [!IMPORTANT]
+> The field list in `DEVICE_FIELDS` is an **allowlist**, not a blocklist. The
+> Django response also carries `owner`, `owner_email`, `owner_is_admin`,
+> `visibility` and `request_origin`, none of which belong on a public endpoint.
+> Adding a field to the Django model must never publish it here automatically —
+> keep this an allowlist.
+
+Only devices with public visibility are returned; the backend applies that
+filter, and also excludes devices with no data.
+
+Responses are UTF-8 with `Content-Type: application/json; charset=utf-8`, so
+Armenian text arrives readable rather than as `\uXXXX` escapes. Both forms are
+valid JSON and parse identically, but the escaped form is unreadable in curl and
+about twice the bytes.
+
+| Code | Meaning                                          |
+| :--- | :----------------------------------------------- |
+| 200  | Success                                          |
+| 502  | The Django backend is unreachable or refused     |
+| 500  | `BOT_SHARED_SECRET` unset; details in CloudWatch |
+
+## `GET /getData`
 
 | Parameter    | Required          | Format                                   |
 | :----------- | :---------------- | :--------------------------------------- |
@@ -194,6 +285,9 @@ device's table.
 | 400  | Bad parameters                      |
 | 413  | Range too large — see below         |
 | 500  | Server error; details in CloudWatch |
+
+`/getData` never calls the Django backend, so it is unaffected if the backend
+is down.
 
 ---
 
@@ -299,8 +393,13 @@ First run seeds ~172k rows; later runs top up. To reseed:
 psql -d climatenet_test -c 'DROP TABLE device8, device999'
 ```
 
-12 tests cover the payload cap, gzip round-trip, row ordering, the default
+20 tests cover the payload cap, gzip round-trip, row ordering, the default
 window, empty tables, input validation and malformed events.
+
+The `/getDevices` tests stub the HTTP call, so they need no network. The stub
+payload deliberately includes `owner_email` and the other private fields, and
+`test_devices_never_leaks_private_fields` asserts they never reach the response
+body — that is the one to keep green if you touch `DEVICE_FIELDS`.
 
 Against the real database:
 
@@ -331,6 +430,9 @@ built for one Python version, so reverting the runtime alone breaks the import.
 | 502, browser reports CORS error       | Raise memory to 1024 MB; real error is in CloudWatch               |
 | Console shows base64 gibberish        | Expected — response was gzipped                                    |
 | curl prints binary                    | Add `--compressed`                                                 |
+| `/getDevices` returns 502             | Backend down, or `BOT_SHARED_SECRET` does not match Django's. Real cause in CloudWatch |
+| `/getDevices` returns 500             | `BOT_SHARED_SECRET` not set on the function                        |
+| `/getDevices` returns readings        | Path mismatch — the handler matches the last segment, `getDevices` |
 
 **Known limitation:** CORS headers are attached to every response the function
 returns, but not to ones API Gateway generates itself (502, 504, 429). Those

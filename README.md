@@ -12,7 +12,7 @@ Each directory is one independently deployed Lambda.
 
 | Directory                                                 | Trigger                      | Target         | Purpose                                                                      |
 | :-------------------------------------------------------- | :--------------------------- | :------------- | :--------------------------------------------------------------------------- |
-| [`climate_net_api`](climate_net_api/)                     | API Gateway — `GET /getData` | RDS PostgreSQL | Serves historical and recent climate readings to the frontend                |
+| [`climate_net_api`](climate_net_api/)                     | API Gateway — `GET /getData`, `GET /getDevices` | RDS PostgreSQL + Django backend | Public developer API: climate readings, and the device list naming valid `device_id` values |
 | [`data_to_rds`](data_to_rds/)                             | AWS IoT Core (MQTT)          | RDS PostgreSQL | Stores sensor payloads from the station fleet                                |
 | [`fromEspToRDS`](fromEspToRDS/)                           | API Gateway (HTTP POST)      | RDS PostgreSQL | Same, for the portable ESP-based air monitors                                |
 | [`certificate_auto_gen`](certificate_auto_gen/)           | API Gateway (HTTP)           | AWS IoT Core   | Provisions IoT Things, creates certificates and keys, packages them as a ZIP |
@@ -29,7 +29,10 @@ Portable monitors ──HTTP──────────────►  fromE
                                                   RDS PostgreSQL
                                                    device8, device12, …
                                                           │
-Frontend  ──GET /getData──►  API Gateway  ──►  climate_net_api
+Third-party ──GET /getData────►  API Gateway  ──►  climate_net_api
+developers  ──GET /getDevices─►                        │
+                                                       ▼
+                                            Django backend (device list)
 ```
 
 ```text
@@ -52,7 +55,7 @@ they keep credentials out of the deployment package.
 
 | Function                    | Variables                                                                 |
 | :-------------------------- | :------------------------------------------------------------------------ |
-| `climate_net_api`           | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE` _(optional)_ |
+| `climate_net_api`           | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE` _(optional)_, `BOT_SHARED_SECRET`, `DEVICES_URL` _(optional)_ |
 | `cognito-custom-message`    | `REDIRECT_URL`                                                            |
 | `cognito-post-confirmation` | `DJANGO_WEBHOOK_URL`, `WEBHOOK_SHARED_SECRET`                             |
 
