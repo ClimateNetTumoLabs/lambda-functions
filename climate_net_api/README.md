@@ -3,6 +3,17 @@
 Serves climate readings from RDS (PostgreSQL) over an API Gateway HTTP API.
 One table per device (`device8`, `device12`, …), written by `data_to_rds`.
 
+## Quick Start
+
+List devices, fetch readings, optionally by date range. Wide ranges may return
+gzipped — add `--compressed`.
+
+```bash
+curl "https://emvnh9buoh.execute-api.us-east-1.amazonaws.com/getDevices"
+curl "https://emvnh9buoh.execute-api.us-east-1.amazonaws.com/getData?device_id=8"
+curl --compressed "https://emvnh9buoh.execute-api.us-east-1.amazonaws.com/getData?device_id=8&start_time=2025-01-01&end_time=2025-01-31"
+```
+
 | File                 | Purpose                               |
 | :------------------- | :------------------------------------ |
 | `lambda_function.py` | The handler                           |

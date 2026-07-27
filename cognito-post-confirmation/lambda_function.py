@@ -22,7 +22,7 @@ logger.setLevel(logging.INFO)
 
 DJANGO_WEBHOOK_URL = os.environ.get(
     "DJANGO_WEBHOOK_URL",
-    "https://api.climatenet.am/api/webhooks/cognito-confirm/",
+    "https://climatenet.am/api/webhooks/cognito-confirm/",
 )
 WEBHOOK_SHARED_SECRET = os.environ.get("WEBHOOK_SHARED_SECRET", "")
 
