@@ -3,6 +3,13 @@ USER = ""
 PASSWORD = ""
 DB_NAME = ""
 
+# Topic the device subscribes to for delivery confirmations. {device} is replaced
+# with the device name from the message. Must resolve to the same string as
+# MQTT_ACK_TOPIC in that device's .env, and the device's IoT policy must allow
+# iot:Subscribe and iot:Receive on it.
+# Format: "<your-ack-prefix>/{device}"
+ACK_TOPIC_TEMPLATE = ""
+
 COLUMNS = {
     "time": "TIMESTAMP",
     "uv": "REAL",

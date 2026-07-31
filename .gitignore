@@ -3,6 +3,7 @@ venv/
 
 lambda_function.zip
 config.py
+package/
 
 __pycache__/
 

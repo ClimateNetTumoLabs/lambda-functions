@@ -44,6 +44,10 @@ def lambda_handler(event, context):
         http_method = event.get('httpMethod', '')
         delete = body.get('delete') if body else None
         thing_name = body.get('thingName') if body else None
+        # Station coordinates for the device's UV lookup. Optional - omitted means
+        # the station reports uv as null rather than another location's reading.
+        latitude = body.get('latitude') if body else None
+        longitude = body.get('longitude') if body else None
 
         # ------------------------------------------------------------------
         # POST — delete or create
@@ -61,7 +65,7 @@ def lambda_handler(event, context):
                     "thingName is required. Send {'thingName': 'UserDevice123456'}."
                 )
 
-            return _create_thing_and_certificate(thing_name)
+            return _create_thing_and_certificate(thing_name, latitude, longitude)
 
         # ------------------------------------------------------------------
         # Any other method — unsupported
@@ -76,11 +80,19 @@ def lambda_handler(event, context):
         return build_error_response(str(e))
 
 
-def _create_thing_and_certificate(new_thing_name):
+def _create_thing_and_certificate(new_thing_name, latitude=None, longitude=None):
     """Create an AWS IoT Thing, generate certificates, and return a ZIP."""
 
     # Extract the numeric suffix for the device ID (e.g. "UserDevice643781" → "643781")
     device_id = ''.join(filter(str.isdigit, new_thing_name)) or new_thing_name
+
+    # Refuse rather than hand out a station that can never confirm a delivery:
+    # without an ack topic it publishes fine and then buffers everything forever.
+    if not config.ACK_TOPIC_TEMPLATE:
+        return build_error_response(
+            "ACK_TOPIC_TEMPLATE is not set in config.py - generated devices could "
+            "never confirm stored records."
+        )
 
     certificate_response = create_keys_and_certificate()
 
@@ -101,10 +113,18 @@ def _create_thing_and_certificate(new_thing_name):
 
     attach_certificate_to_thing(new_thing_name, certificate_response['certificateArn'])
 
+    # Built the same way data_to_rds derives it, so the two always agree.
+    ack_topic = config.ACK_TOPIC_TEMPLATE.format(device=f"device{device_id}")
+
     environment_file = (
         f"DEVICE_ID={device_id}\n"
         f"MQTT_TOPIC={config.MQTT_TOPIC}\n"
+        f"MQTT_ACK_TOPIC={ack_topic}\n"
         f"MQTT_BROKER_ENDPOINT={config.MQTT_ENDPOINT}\n\n"
+        f"#Station coordinates in decimal degrees, used for the UV lookup.\n"
+        f"#Blank means uv is reported as null instead of another location's value.\n"
+        f"LATITUDE={'' if latitude is None else latitude}\n"
+        f"LONGITUDE={'' if longitude is None else longitude}\n\n"
         f"#Custom database names must include the .json extension, for example: local_data.json\n"
         f"LOCAL_DB="
     )
