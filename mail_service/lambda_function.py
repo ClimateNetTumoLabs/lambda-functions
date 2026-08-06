@@ -51,7 +51,17 @@ TEMPLATES = {
         "subject": "ClimateNet Device Termination Notice",
         "file": "termination.html",
     },
+    "password_reset": {
+        "subject": "Reset your ClimateNet password",
+        "file": "reset_password.html",
+    },
 }
+
+# Body keys forwarded into templates as {{placeholders}} on top of the standard
+# recipient fields. Allow-listed rather than passing the whole body through, so
+# a caller can't inject arbitrary markup into the email by naming a key after
+# something in base.html.
+PASSTHROUGH_VARIABLES = ("access_uuid", "reset_link")
 
 import urllib.request
 import time
@@ -98,13 +108,18 @@ def lambda_handler(event, context):
     subject = template_cfg["subject"]
     cache_buster = int(time.time())
 
+    variables = {
+        "recipient_name": name,
+        "recipient_email": name or recipient,
+        "cache_buster": cache_buster,
+    }
+    # Without this, extra keys sent by Django reach the Lambda but never the
+    # template — the placeholder survives into the delivered email.
+    for key in PASSTHROUGH_VARIABLES:
+        variables[key] = body.get(key, "")
+
     try:
-        html_body = _render_template(template_cfg["file"], {
-            "recipient_name": name,
-            "recipient_email": name or recipient,
-            "access_uuid": body.get("access_uuid", ""),
-            "cache_buster": cache_buster,
-        })
+        html_body = _render_template(template_cfg["file"], variables)
     except FileNotFoundError:
         return build_error_response(
             f"Template file not found: {template_cfg['file']}"
