@@ -7,7 +7,34 @@ import json
 import psycopg2
 import traceback
 import config  # Import your existing config file
+from datetime import datetime
+from zoneinfo import ZoneInfo  # Python 3.9+
 
+
+def convert_utc_to_armenia(time_str):
+    """
+    Converts UTC timestamp string to Armenia time (UTC+4).
+    Supports ISO format: 'YYYY-MM-DD HH:MM:SS' or with 'T'
+    """
+    try:
+        if not time_str:
+            return time_str
+
+        # Normalize format (handle both " " and "T")
+        time_str = time_str.replace("T", " ")
+
+        # Parse as UTC
+        dt_utc = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+        dt_utc = dt_utc.replace(tzinfo=ZoneInfo("UTC"))
+
+        # Convert to Armenia timezone
+        dt_am = dt_utc.astimezone(ZoneInfo("Asia/Yerevan"))
+
+        return dt_am.strftime("%Y-%m-%d %H:%M:%S")
+
+    except Exception as e:
+        print(f"Time conversion error: {e}")
+        return time_str  # fallback
 
 def validate_value(key, value):
     """Validates and formats a value based on the specified column type."""
@@ -17,29 +44,29 @@ def validate_value(key, value):
             return "NULL"
 
         column_type = config.COLUMNS.get(key, "VARCHAR(255)")
-
+        
         # SMALLINT - round to integer
         if column_type == "SMALLINT":
             return str(int(round(float(value))))
-
+        
         # REAL/FLOAT - return as number (no quotes)
         if column_type == "REAL" or column_type == "FLOAT":
             return str(round(float(value), 2))
-
+        
         # INTEGER
         if column_type == "INTEGER" or column_type == "INT":
             return str(int(value))
-
+        
         # VARCHAR/TEXT - add single quotes and escape any existing quotes
         if "VARCHAR" in column_type or "TEXT" in column_type or "CHAR" in column_type:
             # Escape single quotes by doubling them
             escaped_value = str(value).replace("'", "''")
             return f"'{escaped_value}'"
-
+        
         # Default: treat as string
         escaped_value = str(value).replace("'", "''")
         return f"'{escaped_value}'"
-
+        
     except (ValueError, TypeError) as e:
         print(f"Validation error for {key}={value}: {str(e)}")
         return "NULL"
@@ -63,7 +90,7 @@ def connect_to_db():
 def create_table(device, connection):
     """Creates a table in the database for the specified device."""
     try:
-        column_definitions = [f"{column_name} {column_type}"
+        column_definitions = [f"{column_name} {column_type}" 
                             for column_name, column_type in config.COLUMNS.items()]
         query_columns = ",\n    ".join(column_definitions)
 
@@ -77,22 +104,31 @@ def create_table(device, connection):
         with connection.cursor() as cursor:
             cursor.execute(create_table_query)
             connection.commit()
-
+            
         print(f"Table {device} ready")
     except Exception as e:
         raise Exception(f"Failed to create table for device {device}. Error: {str(e)}")
 
 
-def add_message(device, data, connection):
-    """Inserts messages into the specified device's table."""
+def add_message(device, data, connection, tz_source):
     try:
         with connection.cursor() as cursor:
             for data_dict in data:
                 keys = []
                 values = []
 
-                for key, value in data_dict.items():
+                for key, value in data_dict.items():  # ✅ NOW INSIDE LOOP
                     if key in config.COLUMNS.keys():
+
+                        if key.lower() in ["timestamp", "time", "created_at"]:
+                            print(f"TZ SOURCE: {tz_source}")
+                            if tz_source == "sim":
+                                print(f"[BEFORE] {value}")
+                                value = convert_utc_to_armenia(value)
+                                print(f"[AFTER] {value}")
+                            else:
+                                print(f"[SKIPPED TZ CONVERSION] {value}")
+
                         keys.append(key)
                         values.append(validate_value(key, value))
 
@@ -114,18 +150,17 @@ def add_message(device, data, connection):
         connection.rollback()
         raise Exception(f"Failed to insert messages for device {device}. Error: {str(e)}")
 
-
 def lambda_handler(event, context):
     """
     Handles the Lambda function execution.
     """
     connection = None
-
+    
     try:
         # Log the incoming event
         print("Received event:")
         print(json.dumps(event, indent=2))
-
+        
         # Parse body if it's from API Gateway
         if 'body' in event:
             if isinstance(event['body'], str):
@@ -134,11 +169,12 @@ def lambda_handler(event, context):
                 body = event['body']
         else:
             body = event
-
+        
         # Extract device and data
         device = body.get('device')
         device_data = body.get('data')
-
+        tz_source = body.get('tz_source')  # default = "wifi" (safe fallback)
+        
         # Validation
         if not device:
             return {
@@ -149,7 +185,7 @@ def lambda_handler(event, context):
                 },
                 'body': json.dumps({'error': 'Parameter "device" is missing'})
             }
-
+            
         if not device_data:
             return {
                 'statusCode': 400,
@@ -159,7 +195,7 @@ def lambda_handler(event, context):
                 },
                 'body': json.dumps({'error': 'Parameter "data" is missing'})
             }
-
+        
         if not isinstance(device_data, list):
             return {
                 'statusCode': 400,
@@ -169,15 +205,14 @@ def lambda_handler(event, context):
                 },
                 'body': json.dumps({'error': 'Parameter "data" must be an array'})
             }
-
+        
         print(f"Processing device: {device}")
         print(f"Data records: {len(device_data)}")
-
+        
         # Database operations
         connection = connect_to_db()
         create_table(device=device, connection=connection)
-        add_message(device=device, data=device_data, connection=connection)
-
+        add_message(device=device, data=device_data, connection=connection, tz_source=tz_source)        
         return {
             'statusCode': 200,
             'headers': {
@@ -190,14 +225,14 @@ def lambda_handler(event, context):
                 'records': len(device_data)
             })
         }
-
+        
     except Exception as e:
         error_msg = str(e)
         stack_trace = traceback.format_exc()
-
+        
         print(f"ERROR: {error_msg}")
         print(f"Stack trace:\n{stack_trace}")
-
+        
         return {
             'statusCode': 500,
             'headers': {
@@ -209,7 +244,7 @@ def lambda_handler(event, context):
                 'message': error_msg
             })
         }
-
+        
     finally:
         if connection:
             connection.close()
